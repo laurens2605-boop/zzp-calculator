@@ -1,65 +1,1089 @@
-import Image from "next/image";
+"use client";
 
-export default function Home() {
+import { useState, useMemo } from "react";
+import type { ReactNode } from "react";
+
+const TAX_2026 = {
+  schijf1: { limit: 38883, rate: 0.3575 },
+  schijf2: { limit: 78426, rate: 0.3756 },
+  schijf3: { rate: 0.495 },
+  zelfstandigenaftrek: 1200,
+  mkbVrijstelling: 0.127,
+  urencriterium: 1225,
+  btw: 0.21,
+};
+
+function calcIB(belastbareWinst: number): number {
+  if (belastbareWinst <= 0) return 0;
+  const { schijf1, schijf2, schijf3 } = TAX_2026;
+  if (belastbareWinst <= schijf1.limit) {
+    return belastbareWinst * schijf1.rate;
+  } else if (belastbareWinst <= schijf2.limit) {
+    return (
+      schijf1.limit * schijf1.rate +
+      (belastbareWinst - schijf1.limit) * schijf2.rate
+    );
+  } else {
+    return (
+      schijf1.limit * schijf1.rate +
+      (schijf2.limit - schijf1.limit) * schijf2.rate +
+      (belastbareWinst - schijf2.limit) * schijf3.rate
+    );
+  }
+}
+
+type Theme = {
+  bg: string;
+  card: string;
+  border: string;
+  text: string;
+  textMuted: string;
+  textSoft: string;
+  gold: string;
+  goldSoft: string;
+  goldBg: string;
+};
+
+export default function ZZPCalculator() {
+  const [hourlyRate, setHourlyRate] = useState(95);
+  const [hoursPerWeek, setHoursPerWeek] = useState(32);
+  const [weeksPerYear, setWeeksPerYear] = useState(46);
+  const [costsPerMonth, setCostsPerMonth] = useState(250);
+  const [btwEnabled, setBtwEnabled] = useState(true);
+  const [viaIntermediair, setViaIntermediair] = useState(false);
+  const [intermediairPct, setIntermediairPct] = useState(5);
+  const [showAdvanced, setShowAdvanced] = useState(false);
+
+  const calc = useMemo(() => {
+    const hoursYear = hoursPerWeek * weeksPerYear;
+    const meetsUrencriterium = hoursYear >= TAX_2026.urencriterium;
+    const grossYear = hourlyRate * hoursYear;
+    const intermediairFee = viaIntermediair
+      ? grossYear * (intermediairPct / 100)
+      : 0;
+    const revenueAfterIntermediair = grossYear - intermediairFee;
+    const btwAmount = btwEnabled
+      ? revenueAfterIntermediair * TAX_2026.btw
+      : 0;
+    const costsYear = costsPerMonth * 12;
+    const fiscaleWinst = revenueAfterIntermediair - costsYear;
+    const zelfstandigenaftrek = meetsUrencriterium
+      ? TAX_2026.zelfstandigenaftrek
+      : 0;
+    const winstNaZA = Math.max(0, fiscaleWinst - zelfstandigenaftrek);
+    const mkbVrijstelling = winstNaZA * TAX_2026.mkbVrijstelling;
+    const belastbareWinst = winstNaZA - mkbVrijstelling;
+    const ib = calcIB(belastbareWinst);
+    const netYear = fiscaleWinst - ib;
+    const netMonth = netYear / 12;
+    const effectiveHourlyNet = hoursYear > 0 ? netYear / hoursYear : 0;
+    const effectiveTaxRate = fiscaleWinst > 0 ? ib / fiscaleWinst : 0;
+
+    return {
+      hoursYear,
+      meetsUrencriterium,
+      grossYear,
+      intermediairFee,
+      revenueAfterIntermediair,
+      btwAmount,
+      costsYear,
+      fiscaleWinst,
+      zelfstandigenaftrek,
+      winstNaZA,
+      mkbVrijstelling,
+      belastbareWinst,
+      ib,
+      netYear,
+      netMonth,
+      effectiveHourlyNet,
+      effectiveTaxRate,
+    };
+  }, [
+    hourlyRate,
+    hoursPerWeek,
+    weeksPerYear,
+    costsPerMonth,
+    btwEnabled,
+    viaIntermediair,
+    intermediairPct,
+  ]);
+
+  const fmt = (n: number) =>
+    new Intl.NumberFormat("nl-NL", {
+      style: "currency",
+      currency: "EUR",
+      maximumFractionDigits: 0,
+    }).format(n);
+
+  const fmtDec = (n: number) =>
+    new Intl.NumberFormat("nl-NL", {
+      style: "currency",
+      currency: "EUR",
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    }).format(n);
+
+  const t: Theme = {
+    bg: "#F8F6F0",
+    card: "#FFFFFF",
+    border: "#E8E5DC",
+    text: "#1A1F2E",
+    textMuted: "#5A6072",
+    textSoft: "#8A8F9E",
+    gold: "#EDB731",
+    goldSoft: "#FAE9B8",
+    goldBg: "#FFF6DB",
+  };
+
   return (
-    <div className="flex flex-col flex-1 items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex flex-1 w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the page.tsx file.
+    <div
+      className="min-h-screen w-full"
+      style={{
+        fontFamily: "'Sora', system-ui, sans-serif",
+        background: t.bg,
+        color: t.text,
+      }}
+    >
+      {/* Header */}
+      <header
+        className="sticky top-0 z-10 backdrop-blur-sm"
+        style={{
+          background: "rgba(248, 246, 240, 0.88)",
+          borderBottom: `1px solid ${t.border}`,
+        }}
+      >
+        <div className="max-w-6xl mx-auto px-5 md:px-8 py-4 flex items-center justify-between">
+          <div
+            className="text-lg md:text-xl font-bold tracking-tight"
+            style={{ color: t.gold, fontWeight: 700 }}
+          >
+            Rocksolid Solutions
+          </div>
+          <div className="flex items-center gap-2">
+            <CircleButton t={t}>
+              <Diamond filled size={14} color={t.gold} />
+            </CircleButton>
+            <CircleButton t={t} active>
+              <span style={{ fontSize: 15 }}>🧮</span>
+            </CircleButton>
+          </div>
+        </div>
+      </header>
+
+      <main className="max-w-6xl mx-auto px-5 md:px-8 py-12 md:py-20">
+        {/* Hero */}
+        <div className="text-center mb-14 md:mb-20">
+          <div
+            className="text-xs md:text-sm font-bold tracking-[0.25em] uppercase mb-5"
+            style={{ color: t.gold }}
+          >
+            ZZP Calculator — 2026
+          </div>
+          <h1
+            className="text-5xl md:text-7xl font-extrabold leading-[1.05] tracking-tight"
+            style={{ fontWeight: 800 }}
+          >
+            Wat hou je <span style={{ color: t.gold }}>écht</span> over
           </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
+          <p
+            className="text-base md:text-lg mt-6 max-w-xl mx-auto leading-relaxed"
+            style={{ color: t.textMuted }}
+          >
+            Volledige berekening met kosten, BTW, en échte
+            NL-belastingschijven — incl. zelfstandigenaftrek en
+            MKB-winstvrijstelling.
           </p>
         </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={16}
-            />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
+
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-5 md:gap-6">
+          {/* LEFT: INPUT */}
+          <div className="space-y-5 md:space-y-6">
+            {/* Uurtarief */}
+            <Card t={t}>
+              <CardHeader
+                t={t}
+                icon={<Diamond filled size={20} color={t.gold} />}
+                title="Uurtarief"
+                value={`€ ${hourlyRate}`}
+                sub="excl. BTW"
+              />
+              <Slider
+                min={25}
+                max={200}
+                value={hourlyRate}
+                onChange={setHourlyRate}
+                t={t}
+              />
+              <NumberInput
+                value={hourlyRate}
+                onChange={setHourlyRate}
+                t={t}
+                suffix="per uur"
+              />
+            </Card>
+
+            {/* Uren */}
+            <Card t={t}>
+              <CardHeader
+                t={t}
+                icon={<Diamond size={20} color={t.gold} />}
+                title="Uren per week"
+                value={`${hoursPerWeek} u`}
+                sub={`${calc.hoursYear} uur per jaar${
+                  calc.meetsUrencriterium ? " · urencriterium gehaald ✓" : ""
+                }`}
+              />
+              <Slider
+                min={4}
+                max={60}
+                value={hoursPerWeek}
+                onChange={setHoursPerWeek}
+                t={t}
+              />
+              <NumberInput
+                value={hoursPerWeek}
+                onChange={setHoursPerWeek}
+                t={t}
+                suffix="uur per week"
+              />
+            </Card>
+
+            {/* AFDRACHT GROEP */}
+            <Card t={t}>
+              <div className="mb-6">
+                <Diamond filled size={20} color={t.gold} />
+                <h3
+                  className="text-xl md:text-2xl font-bold tracking-tight mt-4 mb-1"
+                  style={{ fontWeight: 700 }}
+                >
+                  Afdracht
+                </h3>
+                <p className="text-sm" style={{ color: t.textMuted }}>
+                  Kosten, BTW en inkomstenbelasting
+                </p>
+              </div>
+
+              {/* Kosten */}
+              <div className="mb-6">
+                <div className="flex items-baseline justify-between mb-2">
+                  <label
+                    className="text-sm font-semibold"
+                    style={{ color: t.text }}
+                  >
+                    Bedrijfskosten
+                  </label>
+                  <span
+                    className="text-lg font-bold"
+                    style={{ color: t.gold, fontWeight: 700 }}
+                  >
+                    € {costsPerMonth}/mnd
+                  </span>
+                </div>
+                <p className="text-xs mb-3" style={{ color: t.textSoft }}>
+                  Laptop, software, boekhouder, telefoon, etc.
+                </p>
+                <Slider
+                  min={0}
+                  max={2000}
+                  value={costsPerMonth}
+                  onChange={setCostsPerMonth}
+                  t={t}
+                />
+                <NumberInput
+                  value={costsPerMonth}
+                  onChange={setCostsPerMonth}
+                  t={t}
+                  suffix="per maand"
+                />
+              </div>
+
+              <div className="h-px my-5" style={{ background: t.border }} />
+
+              {/* BTW */}
+              <div className="mb-5">
+                <div className="flex items-center justify-between mb-2">
+                  <div>
+                    <div
+                      className="text-sm font-semibold"
+                      style={{ color: t.text }}
+                    >
+                      BTW (21%)
+                    </div>
+                    <p className="text-xs mt-0.5" style={{ color: t.textSoft }}>
+                      {btwEnabled
+                        ? "Je factureert incl. BTW, draagt af per kwartaal"
+                        : "Geen BTW (KOR of vrijgesteld)"}
+                    </p>
+                  </div>
+                  <Toggle
+                    checked={btwEnabled}
+                    onChange={setBtwEnabled}
+                    t={t}
+                  />
+                </div>
+                {btwEnabled && (
+                  <div
+                    className="mt-3 p-3 rounded-xl text-sm flex items-center justify-between"
+                    style={{ background: t.goldBg }}
+                  >
+                    <span style={{ color: t.textMuted }}>
+                      Per jaar apart zetten
+                    </span>
+                    <span
+                      className="font-bold"
+                      style={{ color: t.text, fontWeight: 700 }}
+                    >
+                      {fmt(calc.btwAmount)}
+                    </span>
+                  </div>
+                )}
+              </div>
+
+              <div className="h-px my-5" style={{ background: t.border }} />
+
+              {/* IB */}
+              <div>
+                <div className="flex items-baseline justify-between mb-2">
+                  <div>
+                    <label
+                      className="text-sm font-semibold"
+                      style={{ color: t.text }}
+                    >
+                      Inkomstenbelasting
+                    </label>
+                    <p className="text-xs mt-0.5" style={{ color: t.textSoft }}>
+                      Schijf 1–3 · incl. zelfstandigenaftrek + MKB
+                    </p>
+                  </div>
+                  <span
+                    className="text-lg font-bold"
+                    style={{ color: t.gold, fontWeight: 700 }}
+                  >
+                    {(calc.effectiveTaxRate * 100).toFixed(1)}%
+                  </span>
+                </div>
+
+                <div className="space-y-2 mt-4">
+                  <MiniRow
+                    t={t}
+                    label="Fiscale winst"
+                    value={fmt(calc.fiscaleWinst)}
+                  />
+                  <MiniRow
+                    t={t}
+                    label="− Zelfstandigenaftrek"
+                    value={
+                      calc.meetsUrencriterium
+                        ? `− ${fmt(calc.zelfstandigenaftrek)}`
+                        : "✗ niet van toepassing"
+                    }
+                  />
+                  <MiniRow
+                    t={t}
+                    label="− MKB-vrijstelling (12,7%)"
+                    value={`− ${fmt(calc.mkbVrijstelling)}`}
+                  />
+                  <MiniRow
+                    t={t}
+                    label="Belastbare winst"
+                    value={fmt(calc.belastbareWinst)}
+                    strong
+                  />
+                  <MiniRow
+                    t={t}
+                    label="Te betalen IB"
+                    value={fmt(calc.ib)}
+                    accent
+                  />
+                </div>
+              </div>
+            </Card>
+
+            {/* INTERMEDIAIR TOGGLE */}
+            <Card t={t}>
+              <div className="flex items-center justify-between mb-4">
+                <div>
+                  <div className="mb-2">
+                    <Diamond
+                      size={20}
+                      color={viaIntermediair ? t.gold : t.textSoft}
+                      filled={viaIntermediair}
+                    />
+                  </div>
+                  <h3
+                    className="text-xl md:text-2xl font-bold tracking-tight"
+                    style={{ fontWeight: 700 }}
+                  >
+                    Via intermediair
+                  </h3>
+                  <p className="text-sm mt-1" style={{ color: t.textMuted }}>
+                    Broker/bemiddelaar pakt % van je omzet
+                  </p>
+                </div>
+                <Toggle
+                  checked={viaIntermediair}
+                  onChange={setViaIntermediair}
+                  t={t}
+                />
+              </div>
+
+              {viaIntermediair && (
+                <div
+                  className="mt-5 pt-5"
+                  style={{ borderTop: `1px solid ${t.border}` }}
+                >
+                  <div className="flex items-baseline justify-between mb-3">
+                    <label
+                      className="text-sm font-semibold"
+                      style={{ color: t.text }}
+                    >
+                      Fee percentage
+                    </label>
+                    <span
+                      className="text-2xl font-extrabold"
+                      style={{ color: t.gold, fontWeight: 800 }}
+                    >
+                      {intermediairPct}%
+                    </span>
+                  </div>
+                  <Slider
+                    min={0}
+                    max={15}
+                    value={intermediairPct}
+                    onChange={setIntermediairPct}
+                    t={t}
+                  />
+                  <div
+                    className="mt-3 p-3 rounded-xl text-sm flex items-center justify-between"
+                    style={{ background: t.goldBg }}
+                  >
+                    <span style={{ color: t.textMuted }}>Fee per jaar</span>
+                    <span
+                      className="font-bold"
+                      style={{ color: t.text, fontWeight: 700 }}
+                    >
+                      − {fmt(calc.intermediairFee)}
+                    </span>
+                  </div>
+                </div>
+              )}
+            </Card>
+
+            {/* Advanced */}
+            <button
+              onClick={() => setShowAdvanced(!showAdvanced)}
+              className="w-full py-3 text-sm font-semibold rounded-full transition-all flex items-center justify-center gap-2"
+              style={{
+                border: `1.5px solid ${t.border}`,
+                background: "transparent",
+                color: t.textMuted,
+              }}
+            >
+              <span
+                style={{
+                  display: "inline-block",
+                  transition: "transform 0.2s",
+                  transform: showAdvanced ? "rotate(45deg)" : "rotate(0deg)",
+                }}
+              >
+                +
+              </span>
+              Geavanceerd
+            </button>
+
+            {showAdvanced && (
+              <Card t={t}>
+                <CardHeader
+                  t={t}
+                  icon={<Diamond size={20} color={t.gold} />}
+                  title="Werkweken per jaar"
+                  value={`${weeksPerYear}`}
+                  sub="52 minus vakantie/ziek"
+                />
+                <Slider
+                  min={30}
+                  max={52}
+                  value={weeksPerYear}
+                  onChange={setWeeksPerYear}
+                  t={t}
+                />
+                <NumberInput
+                  value={weeksPerYear}
+                  onChange={setWeeksPerYear}
+                  t={t}
+                  suffix="weken"
+                />
+              </Card>
+            )}
+          </div>
+
+          {/* RIGHT: RESULTS */}
+          <div className="space-y-5 md:space-y-6 lg:sticky lg:top-24 lg:self-start">
+            {/* Hero result */}
+            <div
+              className="p-7 md:p-9 rounded-2xl relative overflow-hidden"
+              style={{ background: t.text, color: t.bg }}
+            >
+              <div
+                aria-hidden
+                className="absolute -right-8 -top-8 opacity-10 pointer-events-none"
+              >
+                <Diamond filled size={140} color={t.gold} />
+              </div>
+
+              <div
+                className="text-xs font-bold tracking-[0.25em] uppercase mb-3 relative"
+                style={{ color: t.gold }}
+              >
+                Netto per maand
+              </div>
+              <div
+                className="text-6xl md:text-7xl font-extrabold leading-none tracking-tight relative"
+                style={{ fontWeight: 800 }}
+              >
+                {fmt(calc.netMonth)}
+              </div>
+              <div
+                className="text-sm mt-4 flex items-center gap-2 flex-wrap relative"
+                style={{ color: "rgba(248, 246, 240, 0.7)" }}
+              >
+                <span>{fmt(calc.netYear)} per jaar</span>
+                <span>·</span>
+                <span>{fmtDec(calc.effectiveHourlyNet)} netto p/u</span>
+              </div>
+
+              {viaIntermediair && (
+                <div
+                  className="mt-5 pt-5 text-xs relative"
+                  style={{
+                    borderTop: "1px solid rgba(248, 246, 240, 0.15)",
+                    color: "rgba(248, 246, 240, 0.6)",
+                  }}
+                >
+                  Scenario: via intermediair ({intermediairPct}%)
+                </div>
+              )}
+            </div>
+
+            {/* Breakdown */}
+            <Card t={t}>
+              <div
+                className="text-xs font-bold tracking-[0.25em] uppercase mb-5"
+                style={{ color: t.gold }}
+              >
+                Waterfall
+              </div>
+              <div className="space-y-4">
+                <Row
+                  t={t}
+                  label="Bruto omzet"
+                  sublabel="excl. BTW, per jaar"
+                  value={fmt(calc.grossYear)}
+                />
+
+                {viaIntermediair && (
+                  <Row
+                    t={t}
+                    label={`Intermediair (${intermediairPct}%)`}
+                    sublabel="broker fee"
+                    value={`− ${fmt(calc.intermediairFee)}`}
+                    accent
+                  />
+                )}
+
+                <Row
+                  t={t}
+                  label="Bedrijfskosten"
+                  sublabel={`€ ${costsPerMonth}/mnd`}
+                  value={`− ${fmt(calc.costsYear)}`}
+                  accent
+                />
+
+                <div className="h-px" style={{ background: t.border }} />
+
+                <Row
+                  t={t}
+                  label="Fiscale winst"
+                  sublabel="voor IB"
+                  value={fmt(calc.fiscaleWinst)}
+                />
+
+                <Row
+                  t={t}
+                  label="Inkomstenbelasting"
+                  sublabel={`effectief ${(calc.effectiveTaxRate * 100).toFixed(1)}%`}
+                  value={`− ${fmt(calc.ib)}`}
+                  accent
+                />
+
+                <div className="h-px" style={{ background: t.border }} />
+
+                <Row
+                  t={t}
+                  label="Netto per jaar"
+                  sublabel="wat je écht overhoudt"
+                  value={fmt(calc.netYear)}
+                  strong
+                />
+              </div>
+
+              {/* Distribution bar */}
+              <div className="mt-7">
+                <div
+                  className="text-xs font-bold tracking-[0.2em] uppercase mb-3"
+                  style={{ color: t.textMuted }}
+                >
+                  Verdeling
+                </div>
+                <DistributionBar
+                  segments={[
+                    {
+                      value: Math.max(0, calc.netYear),
+                      color: t.text,
+                      label: "Netto",
+                    },
+                    {
+                      value: calc.ib,
+                      color: t.gold,
+                      label: "IB",
+                    },
+                    {
+                      value: calc.costsYear,
+                      color: "#B8651C",
+                      label: "Kosten",
+                    },
+                    ...(viaIntermediair
+                      ? [
+                          {
+                            value: calc.intermediairFee,
+                            color: "#5A6072",
+                            label: "Intermediair",
+                          },
+                        ]
+                      : []),
+                  ]}
+                  t={t}
+                />
+              </div>
+
+              {btwEnabled && (
+                <div
+                  className="mt-5 p-3 rounded-xl text-xs"
+                  style={{ background: t.goldBg, color: t.textMuted }}
+                >
+                  <strong style={{ color: t.text }}>BTW-reminder:</strong>{" "}
+                  je factureert {fmt(calc.btwAmount)} BTW bovenop je tarief —
+                  apart zetten, niet vergeten af te dragen.
+                </div>
+              )}
+            </Card>
+
+            <p
+              className="text-xs leading-relaxed text-center"
+              style={{ color: t.textSoft }}
+            >
+              Indicatief, op basis van tarieven 2026. Exclusief algemene
+              heffingskorting, arbeidskorting, startersaftrek en box
+              3-vermogen. Voor de echte aanslag: bel je accountant.
+            </p>
+          </div>
         </div>
       </main>
+
+      <footer className="mt-10" style={{ borderTop: `1px solid ${t.border}` }}>
+        <div className="max-w-6xl mx-auto px-5 md:px-8 py-6 flex items-center justify-between">
+          <span className="text-sm font-bold" style={{ color: t.gold }}>
+            Rocksolid Solutions
+          </span>
+          <span className="text-xs" style={{ color: t.textSoft }}>
+            Built for freelancers
+          </span>
+        </div>
+      </footer>
+
+      <style>{`
+        .rs-slider {
+          -webkit-appearance: none;
+          appearance: none;
+          width: 100%;
+          height: 6px;
+          background: ${t.border};
+          border-radius: 999px;
+          outline: none;
+        }
+        .rs-slider::-webkit-slider-thumb {
+          -webkit-appearance: none;
+          appearance: none;
+          width: 22px;
+          height: 22px;
+          background: ${t.gold};
+          cursor: pointer;
+          border-radius: 50%;
+          border: 3px solid ${t.card};
+          box-shadow: 0 2px 8px rgba(26, 31, 46, 0.15);
+          transition: transform 0.15s ease;
+        }
+        .rs-slider::-webkit-slider-thumb:hover {
+          transform: scale(1.1);
+        }
+        .rs-slider::-moz-range-thumb {
+          width: 22px;
+          height: 22px;
+          background: ${t.gold};
+          cursor: pointer;
+          border-radius: 50%;
+          border: 3px solid ${t.card};
+          box-shadow: 0 2px 8px rgba(26, 31, 46, 0.15);
+        }
+        .rs-numinput {
+          width: 100%;
+          padding: 12px 16px;
+          background: ${t.bg};
+          border: 1.5px solid ${t.border};
+          border-radius: 12px;
+          font-family: 'Sora', sans-serif;
+          font-size: 15px;
+          font-weight: 500;
+          color: ${t.text};
+          outline: none;
+          transition: border-color 0.15s ease;
+        }
+        .rs-numinput:focus {
+          border-color: ${t.gold};
+        }
+        .rs-numinput::-webkit-outer-spin-button,
+        .rs-numinput::-webkit-inner-spin-button {
+          -webkit-appearance: none;
+          margin: 0;
+        }
+      `}</style>
+    </div>
+  );
+}
+
+// --- Subcomponents ---
+
+function Diamond({
+  filled,
+  size = 20,
+  color = "#EDB731",
+}: {
+  filled?: boolean;
+  size?: number;
+  color?: string;
+}) {
+  return (
+    <div
+      style={{
+        width: size,
+        height: size,
+        background: filled ? color : "transparent",
+        border: filled ? "none" : `2.5px solid ${color}`,
+        transform: "rotate(45deg)",
+        borderRadius: 2,
+        display: "inline-block",
+      }}
+    />
+  );
+}
+
+function CircleButton({
+  children,
+  t,
+  active,
+}: {
+  children: ReactNode;
+  t: Theme;
+  active?: boolean;
+}) {
+  return (
+    <button
+      className="w-10 h-10 rounded-full flex items-center justify-center transition-all"
+      style={{
+        background: active ? t.gold : t.card,
+        border: `1px solid ${active ? t.gold : t.border}`,
+      }}
+    >
+      {children}
+    </button>
+  );
+}
+
+function Card({ children, t }: { children: ReactNode; t: Theme }) {
+  return (
+    <div
+      className="p-6 md:p-7 rounded-2xl"
+      style={{
+        background: t.card,
+        border: `1px solid ${t.border}`,
+      }}
+    >
+      {children}
+    </div>
+  );
+}
+
+function CardHeader({
+  icon,
+  title,
+  value,
+  sub,
+  t,
+}: {
+  icon: ReactNode;
+  title: string;
+  value: string;
+  sub?: string;
+  t: Theme;
+}) {
+  return (
+    <div className="mb-5">
+      <div className="mb-4">{icon}</div>
+      <div className="flex items-baseline justify-between gap-3 mb-1">
+        <h3
+          className="text-xl md:text-2xl font-bold tracking-tight"
+          style={{ color: t.text, fontWeight: 700 }}
+        >
+          {title}
+        </h3>
+        <span
+          className="text-2xl md:text-3xl font-extrabold tracking-tight"
+          style={{ color: t.gold, fontWeight: 800 }}
+        >
+          {value}
+        </span>
+      </div>
+      {sub && (
+        <p className="text-sm" style={{ color: t.textMuted }}>
+          {sub}
+        </p>
+      )}
+    </div>
+  );
+}
+
+function Slider({
+  min,
+  max,
+  value,
+  onChange,
+}: {
+  min: number;
+  max: number;
+  value: number;
+  onChange: (v: number) => void;
+  t: Theme;
+}) {
+  return (
+    <input
+      type="range"
+      min={min}
+      max={max}
+      step="1"
+      value={value}
+      onChange={(e) => onChange(Number(e.target.value))}
+      className="rs-slider mb-4"
+    />
+  );
+}
+
+function NumberInput({
+  value,
+  onChange,
+  t,
+  suffix,
+}: {
+  value: number;
+  onChange: (v: number) => void;
+  t: Theme;
+  suffix?: string;
+}) {
+  return (
+    <div className="flex items-center gap-3">
+      <input
+        type="number"
+        value={value}
+        onChange={(e) => onChange(Number(e.target.value) || 0)}
+        className="rs-numinput"
+        style={{ maxWidth: 140 }}
+      />
+      {suffix && (
+        <span className="text-sm" style={{ color: t.textMuted }}>
+          {suffix}
+        </span>
+      )}
+    </div>
+  );
+}
+
+function Row({
+  label,
+  sublabel,
+  value,
+  accent,
+  strong,
+  t,
+}: {
+  label: string;
+  sublabel?: string;
+  value: string;
+  accent?: boolean;
+  strong?: boolean;
+  t: Theme;
+}) {
+  return (
+    <div className="flex items-baseline justify-between gap-3">
+      <div className="min-w-0">
+        <div
+          className="text-sm md:text-base"
+          style={{
+            color: strong ? t.text : t.textMuted,
+            fontWeight: strong ? 600 : 500,
+          }}
+        >
+          {label}
+        </div>
+        <div className="text-xs" style={{ color: t.textSoft }}>
+          {sublabel}
+        </div>
+      </div>
+      <div
+        className={strong ? "text-xl md:text-2xl" : "text-base md:text-lg"}
+        style={{
+          fontWeight: strong ? 800 : 600,
+          color: accent ? t.gold : t.text,
+        }}
+      >
+        {value}
+      </div>
+    </div>
+  );
+}
+
+function MiniRow({
+  label,
+  value,
+  strong,
+  accent,
+  t,
+}: {
+  label: string;
+  value: string;
+  strong?: boolean;
+  accent?: boolean;
+  t: Theme;
+}) {
+  return (
+    <div className="flex items-center justify-between gap-3">
+      <span
+        className="text-sm"
+        style={{
+          color: strong ? t.text : t.textMuted,
+          fontWeight: strong ? 600 : 400,
+        }}
+      >
+        {label}
+      </span>
+      <span
+        className="text-sm"
+        style={{
+          fontWeight: strong || accent ? 700 : 500,
+          color: accent ? t.gold : t.text,
+        }}
+      >
+        {value}
+      </span>
+    </div>
+  );
+}
+
+function Toggle({
+  checked,
+  onChange,
+  t,
+}: {
+  checked: boolean;
+  onChange: (v: boolean) => void;
+  t: Theme;
+}) {
+  return (
+    <button
+      role="switch"
+      aria-checked={checked}
+      onClick={() => onChange(!checked)}
+      className="relative rounded-full transition-all"
+      style={{
+        width: 48,
+        height: 28,
+        background: checked ? t.gold : t.border,
+      }}
+    >
+      <span
+        className="absolute top-1 rounded-full transition-all"
+        style={{
+          width: 20,
+          height: 20,
+          background: "#FFFFFF",
+          left: checked ? 24 : 4,
+          boxShadow: "0 2px 4px rgba(0,0,0,0.15)",
+        }}
+      />
+    </button>
+  );
+}
+
+function DistributionBar({
+  segments,
+  t,
+}: {
+  segments: Array<{ value: number; color: string; label: string }>;
+  t: Theme;
+}) {
+  const total = segments.reduce((sum, s) => sum + Math.max(0, s.value), 0);
+  if (total === 0) return null;
+
+  return (
+    <div>
+      <div
+        className="w-full h-3 flex overflow-hidden rounded-full"
+        style={{ background: t.border }}
+      >
+        {segments.map((seg, i) => {
+          const pct = (Math.max(0, seg.value) / total) * 100;
+          if (pct === 0) return null;
+          return (
+            <div
+              key={i}
+              style={{
+                width: `${pct}%`,
+                background: seg.color,
+                transition: "width 0.2s ease",
+              }}
+            />
+          );
+        })}
+      </div>
+      <div className="flex flex-wrap gap-x-4 gap-y-2 mt-3 text-xs">
+        {segments.map((seg, i) => {
+          const pct = total > 0 ? (Math.max(0, seg.value) / total) * 100 : 0;
+          return (
+            <div key={i} className="flex items-center gap-1.5">
+              <div
+                style={{
+                  width: 8,
+                  height: 8,
+                  background: seg.color,
+                  borderRadius: 2,
+                }}
+              />
+              <span className="font-semibold" style={{ color: t.text }}>
+                {seg.label}
+              </span>
+              <span style={{ color: t.textSoft }}>{pct.toFixed(0)}%</span>
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 }
