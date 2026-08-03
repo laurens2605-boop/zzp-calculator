@@ -45,16 +45,37 @@ const DEFAULT_STATE: PersistedState = {
   vakantieEnabled: true,
 };
 
+function sanitizeOpdrachten(value: unknown): Opdracht[] {
+  if (!Array.isArray(value)) return DEFAULT_STATE.opdrachten;
+  const cleaned: Opdracht[] = value
+    .filter(
+      (o): o is Record<string, unknown> => typeof o === "object" && o !== null
+    )
+    .map((o) => ({
+      id: typeof o.id === "string" && o.id.length > 0 ? o.id : createOpdrachtId(),
+      hourlyRate:
+        typeof o.hourlyRate === "number" &&
+        Number.isFinite(o.hourlyRate) &&
+        o.hourlyRate >= 0
+          ? o.hourlyRate
+          : DEFAULT_OPDRACHTEN[0].hourlyRate,
+      hoursPerWeek:
+        typeof o.hoursPerWeek === "number" &&
+        Number.isFinite(o.hoursPerWeek) &&
+        o.hoursPerWeek >= 0
+          ? o.hoursPerWeek
+          : DEFAULT_OPDRACHTEN[0].hoursPerWeek,
+    }));
+  return cleaned.length > 0 ? cleaned : DEFAULT_STATE.opdrachten;
+}
+
 function loadPersistedState(): PersistedState {
   try {
     const raw = window.localStorage.getItem(STORAGE_KEY);
     if (!raw) return DEFAULT_STATE;
     const parsed = JSON.parse(raw) as Partial<PersistedState>;
     return {
-      opdrachten:
-        Array.isArray(parsed.opdrachten) && parsed.opdrachten.length > 0
-          ? parsed.opdrachten
-          : DEFAULT_STATE.opdrachten,
+      opdrachten: sanitizeOpdrachten(parsed.opdrachten),
       weeksPerYear:
         typeof parsed.weeksPerYear === "number"
           ? parsed.weeksPerYear
@@ -1224,8 +1245,9 @@ function NumberInput({
     <div className="flex items-center gap-3">
       <input
         type="number"
+        min={0}
         value={value}
-        onChange={(e) => onChange(Number(e.target.value) || 0)}
+        onChange={(e) => onChange(Math.max(0, Number(e.target.value) || 0))}
         className="rs-numinput"
         style={{ maxWidth: 140 }}
       />
