@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import type { ReactNode } from "react";
 
 const TAX_2026 = {
@@ -12,6 +12,97 @@ const TAX_2026 = {
   urencriterium: 1225,
   btw: 0.21,
 };
+
+const STORAGE_KEY = "zzp-calculator-state-v1";
+
+type Opdracht = {
+  id: string;
+  hourlyRate: number;
+  hoursPerWeek: number;
+};
+
+type PersistedState = {
+  opdrachten: Opdracht[];
+  weeksPerYear: number;
+  costsPerMonth: number;
+  btwEnabled: boolean;
+  viaIntermediair: boolean;
+  intermediairPct: number;
+  vakantieEnabled: boolean;
+};
+
+const DEFAULT_OPDRACHTEN: Opdracht[] = [
+  { id: "1", hourlyRate: 95, hoursPerWeek: 32 },
+];
+
+const DEFAULT_STATE: PersistedState = {
+  opdrachten: DEFAULT_OPDRACHTEN,
+  weeksPerYear: 46,
+  costsPerMonth: 250,
+  btwEnabled: true,
+  viaIntermediair: false,
+  intermediairPct: 5,
+  vakantieEnabled: true,
+};
+
+function loadPersistedState(): PersistedState {
+  try {
+    const raw = window.localStorage.getItem(STORAGE_KEY);
+    if (!raw) return DEFAULT_STATE;
+    const parsed = JSON.parse(raw) as Partial<PersistedState>;
+    return {
+      opdrachten:
+        Array.isArray(parsed.opdrachten) && parsed.opdrachten.length > 0
+          ? parsed.opdrachten
+          : DEFAULT_STATE.opdrachten,
+      weeksPerYear:
+        typeof parsed.weeksPerYear === "number"
+          ? parsed.weeksPerYear
+          : DEFAULT_STATE.weeksPerYear,
+      costsPerMonth:
+        typeof parsed.costsPerMonth === "number"
+          ? parsed.costsPerMonth
+          : DEFAULT_STATE.costsPerMonth,
+      btwEnabled:
+        typeof parsed.btwEnabled === "boolean"
+          ? parsed.btwEnabled
+          : DEFAULT_STATE.btwEnabled,
+      viaIntermediair:
+        typeof parsed.viaIntermediair === "boolean"
+          ? parsed.viaIntermediair
+          : DEFAULT_STATE.viaIntermediair,
+      intermediairPct:
+        typeof parsed.intermediairPct === "number"
+          ? parsed.intermediairPct
+          : DEFAULT_STATE.intermediairPct,
+      vakantieEnabled:
+        typeof parsed.vakantieEnabled === "boolean"
+          ? parsed.vakantieEnabled
+          : DEFAULT_STATE.vakantieEnabled,
+    };
+  } catch {
+    return DEFAULT_STATE;
+  }
+}
+
+const noopSubscribe = () => () => {};
+
+// True once the client has hydrated, matching the server snapshot (false)
+// during the initial hydration render so there is never a text mismatch.
+function useHydrated(): boolean {
+  return useSyncExternalStore(
+    noopSubscribe,
+    () => true,
+    () => false
+  );
+}
+
+function createOpdrachtId(): string {
+  if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
+    return crypto.randomUUID();
+  }
+  return `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
 
 function calcIB(belastbareWinst: number): number {
   if (belastbareWinst <= 0) return 0;
@@ -45,19 +136,94 @@ type Theme = {
 };
 
 export default function ZZPCalculator() {
-  const [hourlyRate, setHourlyRate] = useState(95);
-  const [hoursPerWeek, setHoursPerWeek] = useState(32);
-  const [weeksPerYear, setWeeksPerYear] = useState(46);
-  const [costsPerMonth, setCostsPerMonth] = useState(250);
-  const [btwEnabled, setBtwEnabled] = useState(true);
-  const [viaIntermediair, setViaIntermediair] = useState(false);
-  const [intermediairPct, setIntermediairPct] = useState(5);
+  const hydrated = useHydrated();
+  // Remount once hydration completes so the cached values (only readable on
+  // the client) become the fresh initial state, without ever calling
+  // setState from inside an effect.
+  return <ZZPCalculatorInner key={hydrated ? "cached" : "default"} hydrated={hydrated} />;
+}
+
+function ZZPCalculatorInner({ hydrated }: { hydrated: boolean }) {
+  const [initial] = useState<PersistedState>(() =>
+    hydrated ? loadPersistedState() : DEFAULT_STATE
+  );
+  const [opdrachten, setOpdrachten] = useState<Opdracht[]>(
+    initial.opdrachten
+  );
+  const [weeksPerYear, setWeeksPerYear] = useState(initial.weeksPerYear);
+  const [costsPerMonth, setCostsPerMonth] = useState(initial.costsPerMonth);
+  const [btwEnabled, setBtwEnabled] = useState(initial.btwEnabled);
+  const [viaIntermediair, setViaIntermediair] = useState(
+    initial.viaIntermediair
+  );
+  const [intermediairPct, setIntermediairPct] = useState(
+    initial.intermediairPct
+  );
+  const [vakantieEnabled, setVakantieEnabled] = useState(
+    initial.vakantieEnabled
+  );
   const [showAdvanced, setShowAdvanced] = useState(false);
 
+  // Cache the most recent values on this device.
+  useEffect(() => {
+    if (!hydrated) return;
+    try {
+      const toSave: PersistedState = {
+        opdrachten,
+        weeksPerYear,
+        costsPerMonth,
+        btwEnabled,
+        viaIntermediair,
+        intermediairPct,
+        vakantieEnabled,
+      };
+      window.localStorage.setItem(STORAGE_KEY, JSON.stringify(toSave));
+    } catch {
+      // Ignore storage failures (e.g. private browsing quota).
+    }
+  }, [
+    hydrated,
+    opdrachten,
+    weeksPerYear,
+    costsPerMonth,
+    btwEnabled,
+    viaIntermediair,
+    intermediairPct,
+    vakantieEnabled,
+  ]);
+
+  function addOpdracht() {
+    setOpdrachten((prev) => [
+      ...prev,
+      { id: createOpdrachtId(), hourlyRate: 75, hoursPerWeek: 8 },
+    ]);
+  }
+
+  function removeOpdracht(id: string) {
+    setOpdrachten((prev) => prev.filter((o) => o.id !== id));
+  }
+
+  function updateOpdracht(id: string, patch: Partial<Opdracht>) {
+    setOpdrachten((prev) =>
+      prev.map((o) => (o.id === id ? { ...o, ...patch } : o))
+    );
+  }
+
   const calc = useMemo(() => {
-    const hoursYear = hoursPerWeek * weeksPerYear;
+    const effectiveWeeksPerYear = vakantieEnabled ? weeksPerYear : 52;
+    const hoursPerWeekTotal = opdrachten.reduce(
+      (sum, o) => sum + o.hoursPerWeek,
+      0
+    );
+    const hoursYear = hoursPerWeekTotal * effectiveWeeksPerYear;
     const meetsUrencriterium = hoursYear >= TAX_2026.urencriterium;
-    const grossYear = hourlyRate * hoursYear;
+    const grossPerWeek = opdrachten.reduce(
+      (sum, o) => sum + o.hourlyRate * o.hoursPerWeek,
+      0
+    );
+    const grossYear = grossPerWeek * effectiveWeeksPerYear;
+    const blendedHourlyRate =
+      hoursPerWeekTotal > 0 ? grossPerWeek / hoursPerWeekTotal : 0;
     const intermediairFee = viaIntermediair
       ? grossYear * (intermediairPct / 100)
       : 0;
@@ -80,9 +246,12 @@ export default function ZZPCalculator() {
     const effectiveTaxRate = fiscaleWinst > 0 ? ib / fiscaleWinst : 0;
 
     return {
+      effectiveWeeksPerYear,
+      hoursPerWeekTotal,
       hoursYear,
       meetsUrencriterium,
       grossYear,
+      blendedHourlyRate,
       intermediairFee,
       revenueAfterIntermediair,
       btwAmount,
@@ -99,9 +268,9 @@ export default function ZZPCalculator() {
       effectiveTaxRate,
     };
   }, [
-    hourlyRate,
-    hoursPerWeek,
+    opdrachten,
     weeksPerYear,
+    vakantieEnabled,
     costsPerMonth,
     btwEnabled,
     viaIntermediair,
@@ -168,6 +337,25 @@ export default function ZZPCalculator() {
             </CircleButton>
           </div>
         </div>
+
+        {/* Mobile: keep monthly net income visible while scrolling */}
+        <div
+          className="lg:hidden max-w-6xl mx-auto px-5 md:px-8 pb-3 flex items-center justify-between"
+          style={{ borderTop: `1px solid ${t.border}` }}
+        >
+          <span
+            className="text-xs font-bold tracking-[0.2em] uppercase"
+            style={{ color: t.gold }}
+          >
+            Netto / mnd
+          </span>
+          <span
+            className="text-lg font-extrabold"
+            style={{ color: t.text, fontWeight: 800 }}
+          >
+            {fmt(calc.netMonth)}
+          </span>
+        </div>
       </header>
 
       <main className="max-w-6xl mx-auto px-5 md:px-8 py-12 md:py-20">
@@ -198,54 +386,125 @@ export default function ZZPCalculator() {
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-5 md:gap-6">
           {/* LEFT: INPUT */}
           <div className="space-y-5 md:space-y-6">
-            {/* Uurtarief */}
+            {/* Opdrachten */}
             <Card t={t}>
               <CardHeader
                 t={t}
                 icon={<Diamond filled size={20} color={t.gold} />}
-                title="Uurtarief"
-                value={`€ ${hourlyRate}`}
-                sub="excl. BTW"
-              />
-              <Slider
-                min={25}
-                max={200}
-                value={hourlyRate}
-                onChange={setHourlyRate}
-                t={t}
-              />
-              <NumberInput
-                value={hourlyRate}
-                onChange={setHourlyRate}
-                t={t}
-                suffix="per uur"
-              />
-            </Card>
-
-            {/* Uren */}
-            <Card t={t}>
-              <CardHeader
-                t={t}
-                icon={<Diamond size={20} color={t.gold} />}
-                title="Uren per week"
-                value={`${hoursPerWeek} u`}
-                sub={`${calc.hoursYear} uur per jaar${
+                title="Opdrachten"
+                value={`${calc.hoursPerWeekTotal} u/week`}
+                sub={`${calc.hoursYear} uur/jaar${
                   calc.meetsUrencriterium ? " · urencriterium gehaald ✓" : ""
-                }`}
+                } · gem. € ${Math.round(calc.blendedHourlyRate)}/u`}
               />
-              <Slider
-                min={4}
-                max={60}
-                value={hoursPerWeek}
-                onChange={setHoursPerWeek}
-                t={t}
-              />
-              <NumberInput
-                value={hoursPerWeek}
-                onChange={setHoursPerWeek}
-                t={t}
-                suffix="uur per week"
-              />
+
+              <div className="space-y-6">
+                {opdrachten.map((opdracht, idx) => (
+                  <div key={opdracht.id}>
+                    {idx > 0 && (
+                      <div
+                        className="h-px mb-6"
+                        style={{ background: t.border }}
+                      />
+                    )}
+                    <div className="flex items-center justify-between mb-4">
+                      <span
+                        className="text-sm font-semibold"
+                        style={{ color: t.text }}
+                      >
+                        Opdracht {idx + 1}
+                      </span>
+                      {opdrachten.length > 1 && (
+                        <RemoveButton
+                          t={t}
+                          onClick={() => removeOpdracht(opdracht.id)}
+                          label={`Opdracht ${idx + 1} verwijderen`}
+                        />
+                      )}
+                    </div>
+
+                    <div className="mb-4">
+                      <div className="flex items-baseline justify-between mb-2">
+                        <label
+                          className="text-xs font-semibold uppercase tracking-wide"
+                          style={{ color: t.textMuted }}
+                        >
+                          Uurtarief
+                        </label>
+                        <span
+                          className="text-sm font-bold"
+                          style={{ color: t.gold }}
+                        >
+                          € {opdracht.hourlyRate}
+                        </span>
+                      </div>
+                      <Slider
+                        min={25}
+                        max={200}
+                        value={opdracht.hourlyRate}
+                        onChange={(v) =>
+                          updateOpdracht(opdracht.id, { hourlyRate: v })
+                        }
+                        t={t}
+                      />
+                      <NumberInput
+                        value={opdracht.hourlyRate}
+                        onChange={(v) =>
+                          updateOpdracht(opdracht.id, { hourlyRate: v })
+                        }
+                        t={t}
+                        suffix="per uur"
+                      />
+                    </div>
+
+                    <div>
+                      <div className="flex items-baseline justify-between mb-2">
+                        <label
+                          className="text-xs font-semibold uppercase tracking-wide"
+                          style={{ color: t.textMuted }}
+                        >
+                          Uren per week
+                        </label>
+                        <span
+                          className="text-sm font-bold"
+                          style={{ color: t.gold }}
+                        >
+                          {opdracht.hoursPerWeek} u
+                        </span>
+                      </div>
+                      <Slider
+                        min={1}
+                        max={60}
+                        value={opdracht.hoursPerWeek}
+                        onChange={(v) =>
+                          updateOpdracht(opdracht.id, { hoursPerWeek: v })
+                        }
+                        t={t}
+                      />
+                      <NumberInput
+                        value={opdracht.hoursPerWeek}
+                        onChange={(v) =>
+                          updateOpdracht(opdracht.id, { hoursPerWeek: v })
+                        }
+                        t={t}
+                        suffix="uur per week"
+                      />
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              <button
+                onClick={addOpdracht}
+                className="w-full mt-6 py-3 text-sm font-semibold rounded-full transition-all flex items-center justify-center gap-2"
+                style={{
+                  border: `1.5px dashed ${t.border}`,
+                  background: "transparent",
+                  color: t.gold,
+                }}
+              >
+                + Opdracht toevoegen
+              </button>
             </Card>
 
             {/* AFDRACHT GROEP */}
@@ -493,26 +752,60 @@ export default function ZZPCalculator() {
 
             {showAdvanced && (
               <Card t={t}>
-                <CardHeader
-                  t={t}
-                  icon={<Diamond size={20} color={t.gold} />}
-                  title="Werkweken per jaar"
-                  value={`${weeksPerYear}`}
-                  sub="52 minus vakantie/ziek"
-                />
-                <Slider
-                  min={30}
-                  max={52}
-                  value={weeksPerYear}
-                  onChange={setWeeksPerYear}
-                  t={t}
-                />
-                <NumberInput
-                  value={weeksPerYear}
-                  onChange={setWeeksPerYear}
-                  t={t}
-                  suffix="weken"
-                />
+                <div className="flex items-center justify-between mb-5">
+                  <div>
+                    <div
+                      className="text-sm font-semibold"
+                      style={{ color: t.text }}
+                    >
+                      Vakantie & verzuim meenemen
+                    </div>
+                    <p
+                      className="text-xs mt-0.5"
+                      style={{ color: t.textSoft }}
+                    >
+                      Trekt vakantie-/ziekteweken af van je jaarlijkse uren
+                    </p>
+                  </div>
+                  <Toggle
+                    checked={vakantieEnabled}
+                    onChange={setVakantieEnabled}
+                    t={t}
+                  />
+                </div>
+
+                {vakantieEnabled ? (
+                  <>
+                    <CardHeader
+                      t={t}
+                      icon={<Diamond size={20} color={t.gold} />}
+                      title="Werkweken per jaar"
+                      value={`${weeksPerYear}`}
+                      sub="52 minus vakantie/ziek"
+                    />
+                    <Slider
+                      min={30}
+                      max={52}
+                      value={weeksPerYear}
+                      onChange={setWeeksPerYear}
+                      t={t}
+                    />
+                    <NumberInput
+                      value={weeksPerYear}
+                      onChange={setWeeksPerYear}
+                      t={t}
+                      suffix="weken"
+                    />
+                  </>
+                ) : (
+                  <div
+                    className="p-3 rounded-xl text-sm"
+                    style={{ background: t.goldBg, color: t.textMuted }}
+                  >
+                    Berekening gaat uit van 52 werkweken per jaar — geen
+                    vakantie- of ziekteaftrek.
+                  </div>
+                )}
               </Card>
             )}
           </div>
@@ -805,6 +1098,35 @@ function CircleButton({
       }}
     >
       {children}
+    </button>
+  );
+}
+
+function RemoveButton({
+  t,
+  onClick,
+  label,
+}: {
+  t: Theme;
+  onClick: () => void;
+  label: string;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-label={label}
+      title={label}
+      className="w-7 h-7 rounded-full flex items-center justify-center transition-all"
+      style={{
+        border: `1.5px solid ${t.border}`,
+        background: "transparent",
+        color: t.textSoft,
+        fontSize: 14,
+        lineHeight: 1,
+      }}
+    >
+      ×
     </button>
   );
 }
