@@ -1241,13 +1241,37 @@ function NumberInput({
   t: Theme;
   suffix?: string;
 }) {
+  // Free-typed text while editing, so clearing the field to type a fresh
+  // number (e.g. "80") doesn't get coerced to 0 mid-keystroke, which used
+  // to insert a leading zero ("08", then "080", ...).
+  const [text, setText] = useState(String(value));
+  const [prevValue, setPrevValue] = useState(value);
+  if (value !== prevValue) {
+    setPrevValue(value);
+    setText(String(value));
+  }
+
+  function commit(raw: string) {
+    const parsed = Math.max(0, Number(raw) || 0);
+    onChange(parsed);
+    setText(String(parsed));
+  }
+
   return (
     <div className="flex items-center gap-3">
       <input
         type="number"
         min={0}
-        value={value}
-        onChange={(e) => onChange(Math.max(0, Number(e.target.value) || 0))}
+        value={text}
+        onChange={(e) => {
+          const raw = e.target.value;
+          setText(raw);
+          const parsed = Number(raw);
+          if (raw !== "" && Number.isFinite(parsed) && parsed >= 0) {
+            onChange(parsed);
+          }
+        }}
+        onBlur={(e) => commit(e.target.value)}
         className="rs-numinput"
         style={{ maxWidth: 140 }}
       />
